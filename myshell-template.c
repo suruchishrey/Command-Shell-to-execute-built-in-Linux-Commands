@@ -44,18 +44,17 @@ void parseInput(char* rawCommand, char** parsedCommand,char*delim)
         if (strlen(parsedCommand[i]) == 0) 				//for handling more than 1 spaces
             i--; 
     } 
-	if(parsedCommand[0]==NULL)							//for invalid comannds like ^A^Z
+	/*if(parsedCommand[0]==NULL)							//for invalid comannds like ^A^Z
 	{
-		printf("\nShell: Incorrect command");
-	}
+		printf("\nHEREShell: Incorrect command");
+	}*/
 }
 
 void executeCommand(char** parsedCommand)
 {
-	if(parsedCommand[0]==NULL)
+	if(parsedCommand[0]==NULL || strlen(parsedCommand[0])==1)		//for ^Z^C
 	{
-		printf("\nShell: Incorrect command");
-		exit(0);
+		exit(1);
 	}
 	else if(strcmp(parsedCommand[0],"cd")==0)
 	{
@@ -93,7 +92,7 @@ void executeCommand(char** parsedCommand)
 			if(execvp(parsedCommand[0], parsedCommand)<0)
 			{
 				printf("\nShell: Incorrect command");
-				exit(0);
+				exit(1);
 			}
 			
 			//exit(0);
@@ -106,14 +105,97 @@ void executeCommand(char** parsedCommand)
 	}
 }
 
-void executeParallelCommands()
+void executeParallelCommands(char**parsedCommands)
 {
 	// This function will run multiple commands in parallel
+	char *execCommand[MAXLIST];
+	int i=0,cmdSize=0;
+		while (parsedCommands[i]!=NULL)
+		{
+			cmdSize++;
+			i++;
+		}
+	for(int i=0;i<cmdSize;++i)
+	{
+		printf("\nRunning %d process:",i+1);
+		parseInput(parsedCommands[i],execCommand," ");
+		if(strcmp(execCommand[0],"cd")==0)
+			{
+				char newPWD[256];
+				char*argument1=execCommand[1];
+				if(argument1==NULL || strlen(argument1)==0)
+				{
+					chdir(getenv("HOME"));
+				}
+				else{
+					int status = chdir(argument1);
+					if (status != 0)
+					printf("cd: %s: No such directory\n", argument1);
+				}
+		}
+		else{
+			int rc1 = fork();
+			if (rc1 < 0){			// fork failed; exit
+				exit(0);
+			}
+			else if (rc1 == 0) {		// child (new) process 1
+			
+					if(execvp(execCommand[0], execCommand)<0)
+					{
+						printf("\nShell: Incorrect command");
+						exit(1);
+					}
+			}
+		}
+	}
 }
 
-void executeSequentialCommands()
+void executeSequentialCommands(char**parsedCommands)
 {	
 	// This function will run multiple commands in parallel
+	char *execCommand[MAXLIST];
+	int i=0,cmdSize=0;
+		while (parsedCommands[i]!=NULL)
+		{
+			cmdSize++;
+			i++;
+		}
+	for(int i=0;i<cmdSize;++i)
+	{
+		printf("\nRunning %d process:",i+1);
+		parseInput(parsedCommands[i],execCommand," ");
+		if(strcmp(execCommand[0],"cd")==0)
+			{
+				char newPWD[256];
+				char*argument1=execCommand[1];
+				if(argument1==NULL || strlen(argument1)==0)
+				{
+					chdir(getenv("HOME"));
+				}
+				else{
+					int status = chdir(argument1);
+					if (status != 0)
+					printf("cd: %s: No such directory\n", argument1);
+				}
+		}
+		else{
+			int rc1 = fork();
+			if (rc1 < 0){			// fork failed; exit
+				exit(0);
+			}
+			else if (rc1 == 0) {		// child (new) process 1
+			
+					if(execvp(execCommand[0], execCommand)<0)
+					{
+						printf("\nShell: Incorrect command");
+						exit(1);
+					}
+			}
+			else {              // parent process (rc holds child PID)
+				int rc_wait1 = wait(NULL); 		// COMMENTING THIS WAIT WILL CHANGE THE EXECUTION FROM SERIAL TO PARALLEL
+			}
+		}
+	}
 }
 
 void executeCommandRedirection(char**parsedCommands)
@@ -130,11 +212,27 @@ void executeCommandRedirection(char**parsedCommands)
 		// ------- Redirecting STDOUT --------
 		
 		close(STDOUT_FILENO);
-		open(parsedCommands[1], O_CREAT | O_WRONLY | O_APPEND);
 
+		//open the file with required permissions and in required mode(read,write,append)
+		int fd= open(parsedCommands[1], O_CREAT | O_WRONLY | O_APPEND,S_IRWXU);			//For permission,S_IRWXU is equivalent to ‘(S_IRUSR | S_IWUSR | S_IXUSR)’.i.e.,read,write,execute permission for the owner of the file 
+		if(fd<0)
+		{
+			printf("\nShell: Incorrect command");
+			exit(1);
+		}
 		// -----------------------------------
-		
-		execvp(parsedCommands[0],parsedCommands);
+		int i=0,cmdSize=0;
+		while (parsedCommands[i]!=NULL)
+		{
+			cmdSize++;
+			i++;
+		}
+		parsedCommands[cmdSize-1]=NULL;			//more parsing of the input command,makeing the argument ready for execvp
+		if(execvp(parsedCommands[0],parsedCommands)<0)
+		{
+			printf("\nShell: Incorrect command");
+			exit(1);
+		}
 
 	} 
 	else {              // parent process (rc holds child PID)
@@ -150,6 +248,7 @@ int main()
 	size_t commandsize=MAXCOM;
 	int inputSize;
 	char*parsedCommands[MAXLIST];
+	int execChoice;
 
 	// Ignore SIGINT and SIGTSTP signal
 	signal(SIGINT, SIG_IGN);	
@@ -158,7 +257,7 @@ int main()
 	while(1)	// This loop will keep your shell running until user exits.
 	{
 		// Print the prompt in format - currentWorkingDirectory$
-		getcwd(currWD,sizeof(currWD));
+		getcwd(currWD,sizeof(currWD));									//get the current working directory
 		printf("\n%s$",currWD);
 		// accept input with 'getline()'
 		command = (char *)malloc(commandsize * sizeof(char));			//32 bytes of storage are assigned to memory location buffer via the malloc() function
@@ -171,27 +270,51 @@ int main()
 		inputSize=getline(&command,&commandsize,stdin);
 		command[inputSize-1]='\0';							//as getline takes '\n' also in the end of the string
 		
-		// Parse input with 'strsep()' for different symbols (&&, ##, >) and for spaces.
-		parseInput(command,parsedCommands," "); 
-
-		if(parsedCommands[0]==NULL)continue;	//for invalid inputs
-		if(strcmp(parsedCommands[0],"exit")==0)	// When user uses exit command.
+		if(strcmp(command,"exit")==0)	// When user uses exit command.
 		{
 			printf("Exiting shell...");
 			exit(0);
 			break;
 		}
 		
-		//if(/*condition*///)
-		//	executeParallelCommands();		// This function is invoked when user wants to run multiple commands in parallel (commands separated by &&)
-		//else if(/*condition*/)
-		//	executeSequentialCommands();	// This function is invoked when user wants to run multiple commands sequentially (commands separated by ##)
-		//else 
-		//if(/*condition*/)
-		//	executeCommandRedirection(parsedCommands);	// This function is invoked when user wants redirect output of a single command to and output file specificed by user
-		//else
+		if(strchr(command,'&')!=NULL)
+		{
+			char*pos=strchr(command,'&');
+			if(*(pos+1)=='&')
+			{
+				parseInput(command,parsedCommands,"&&");
+				executeParallelCommands(parsedCommands);		// This function is invoked when user wants to run multiple commands in parallel (commands separated by &&)
+				int rc_wait1 = wait(NULL); 
+			}
+			else{
+				printf("\nShell: Incorrect command");
+			}
+		}
+		else if(strchr(command,'#')!=NULL)
+		{
+			char*pos=strchr(command,'#');
+			if(*(pos+1)=='#')
+			{
+				parseInput(command,parsedCommands,"##");
+				executeSequentialCommands(parsedCommands);	// This function is invoked when user wants to run multiple commands sequentially (commands separated by ##)
+			}
+			else{
+				printf("\nShell: Incorrect command");
+			}
+		}
+		else if(strchr(command,'>')!=NULL)
+		{
+			parseInput(command,parsedCommands,">");
+			if(parsedCommands[0]==NULL)continue;	//for invalid inputs
+			executeCommandRedirection(parsedCommands);	// This function is invoked when user wants redirect output of a single command to and output file specificed by user
+		}
+		else
+		{
+			// Parse input with 'strsep()' for different symbols (&&, ##, >) and for spaces.
+			parseInput(command,parsedCommands," "); 
+			if(parsedCommands[0]==NULL)continue;	//for invalid inputs
 			executeCommand(parsedCommands);		// This function is invoked when user wants to run a single commands
-				
+		}	
 	}
 	
 	return 0;
